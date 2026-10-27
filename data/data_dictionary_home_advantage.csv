@@ -1,0 +1,26 @@
+column,type,description
+match_id,string,Unique match id
+league,string,"Competition (EPL, La_Liga, Serie_A, Bundesliga, ...)"
+elo_home,int,EARNED: home team strength (Elo-like)
+elo_away,int,EARNED: away team strength (Elo-like)
+elo_diff,int,elo_home - elo_away (positive favors home on merit)
+crowd_present,int,"1 if fans were present, 0 for a ghost game (empty stadium)"
+stadium_capacity,int,Stadium capacity
+attendance_pct,float,Fraction of capacity filled (0 for ghost games)
+crowd_size,int,Number of spectators
+travel_distance_km,float,Away team travel distance (km); tiny for derbies
+timezones_crossed,int,Time zones crossed by the away team
+is_derby,int,1 if a same-city derby (neutralizes travel & familiarity)
+venue_familiarity,float,Home team familiarity with the venue (0-10)
+referee_bias_susceptibility,float,Latent referee susceptibility to crowd pressure (0-10)
+fouls_home,int,Fouls called against the home team
+fouls_away,int,Fouls called against the away team (crowd-biased upward)
+yellow_home,int,Yellow cards to home
+yellow_away,int,Yellow cards to away (crowd-biased upward)
+red_home,int,Red cards to home
+red_away,int,Red cards to away (crowd-biased upward)
+goals_home,int,Goals scored by home
+goals_away,int,Goals scored by away
+home_goal_diff,int,goals_home - goals_away
+home_result,string,TARGET: home_win / draw / away_win
+home_points,int,"TARGET: home points (3 win, 1 draw, 0 loss)"
