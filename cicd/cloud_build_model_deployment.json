@@ -1,3 +1,4 @@
+
 {
   "steps": [
     {
@@ -6,37 +7,29 @@
       "args": [
         "storage",
         "cp",
-        "gs://${_MODEL_REPO}/model_dt.pkl",
-        "./lab2/prediction-api/testResources/model.pkl"     
-      ]
-    },		
-	{
-      "name": "python:3.12.7",
-      "entrypoint": "/bin/sh",
-      "args": [
-        "-c",
-        "cd ./lab2/prediction-api && python -m venv .myenv && . .myenv/bin/activate && python -m pip install --upgrade pip && python -m pip install -r requirements.txt && python -m pytest --junitxml=${SHORT_SHA}_test_log.xml ./tests"
+        "gs://${_MODEL_REPO}/model.pkl",
+        "./models/model.pkl"
       ]
     },
     {
-      "name": "gcr.io/google.com/cloudsdktool/cloud-sdk",
-      "entrypoint": "gcloud",
+      "name": "python:3.11.9",
+      "entrypoint": "/bin/sh",
       "args": [
-        "storage",
-        "cp",
-        "gs://${_MODEL_REPO}/model_dt.pkl",
-        "./lab2/prediction-api/model.pkl"
+        "-c",
+        "cd ./prediction-api && python -m pip install -r requirements.txt && python -m pytest --junitxml=/workspace/test_log.xml ./tests"
       ]
-    },	
+    },
     {
       "name": "gcr.io/cloud-builders/docker",
       "args": [
         "build",
+        "-f",
+        "prediction-api/Dockerfile",
         "-t",
         "${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/prediction-api:0.0.1",
-        "./lab2/prediction-api"
+        "."
       ]
-    },    
+    },
     {
       "name": "gcr.io/cloud-builders/docker",
       "args": [
@@ -44,13 +37,13 @@
         "${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/prediction-api:0.0.1"
       ]
     },
-	{
+    {
       "name": "gcr.io/cloud-builders/docker",
       "args": [
         "build",
         "-t",
         "${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/prediction-ui:0.0.1",
-        "./lab2/prediction-ui"
+        "./prediction-ui"
       ]
     },
     {
@@ -70,7 +63,7 @@
         "--image",
         "${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/prediction-api:0.0.1",
         "--region",
-        "us-central1",
+        "${_LOCATION}",
         "--platform",
         "managed",
         "--port",
@@ -84,25 +77,14 @@
       "id": "prediction-api-deploy"
     },
     {
-      "name": "ubuntu",
-      "args": [
-        "sleep",
-        "60"
-      ],
-      "waitFor": [
-        "prediction-api-deploy"
-      ],
-      "id": "sleep-delay"
-    },
-    {
       "name": "gcr.io/google.com/cloudsdktool/cloud-sdk",
       "entrypoint": "/bin/sh",
       "args": [
         "-c",
-        "gcloud run services list --platform managed | grep  https://prediction-api | awk '{print $4}' > /workspace/api_url.text"
+        "gcloud run services describe prediction-api --region ${_LOCATION} --format='value(status.url)' > /workspace/api_url.text"
       ],
       "waitFor": [
-        "sleep-delay"
+        "prediction-api-deploy"
       ],
       "id": "api-url-extraction"
     },
@@ -111,7 +93,7 @@
       "entrypoint": "/bin/sh",
       "args": [
         "-c",
-        "gcloud run deploy prediction-ui --image ${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/labrepo/prediction-ui:0.0.1 --set-env-vars PREDICTOR_API=$(cat /workspace/api_url.text)/diabetes_predictor --region us-central1 --platform managed --port 5000 --cpu 2 --memory 4G --allow-unauthenticated"
+        "gcloud run deploy prediction-ui --image ${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/prediction-ui:0.0.1 --set-env-vars PREDICTOR_API=$(cat /workspace/api_url.text)/winrate_predictor --region ${_LOCATION} --platform managed --port 5000 --cpu 2 --memory 4G --allow-unauthenticated"
       ],
       "waitFor": [
         "api-url-extraction"
@@ -122,7 +104,8 @@
     "objects": {
       "location": "gs://${_TEMP_REPO}/",
       "paths": [
-        "/workspace/api_url.text"
+        "/workspace/api_url.text",
+        "/workspace/test_log.xml"
       ]
     }
   },

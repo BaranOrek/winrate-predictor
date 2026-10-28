@@ -43,7 +43,7 @@ def download_data(project_id: str, bucket: str, file_name: str, dataset: Output[
 
 # Pipeline Component : Training Decision Tree Classifier
 @dsl.component(
-    packages_to_install=['pandas', 'scikit-learn==1.3.2'],
+    packages_to_install=['numpy==1.26.4', 'pandas==2.1.4', 'scikit-learn==1.9.1'],
     base_image="python:3.12.7-slim"
 )
 def train_dt(features: Input[Dataset], out_model: Output[Model]) -> NamedTuple('outputs', metrics=dict):
@@ -96,7 +96,7 @@ def train_dt(features: Input[Dataset], out_model: Output[Model]) -> NamedTuple('
 
 # Pipeline Component : Training Logistic Regression
 @dsl.component(
-    packages_to_install=['pandas', 'scikit-learn==1.3.2'],
+    packages_to_install=['numpy==1.26.4', 'pandas==2.1.4', 'scikit-learn==1.9.1'],
     base_image="python:3.12.7-slim"
 )
 def train_lr(features: Input[Dataset], out_model: Output[Model]) -> NamedTuple('outputs', metrics=dict):
@@ -148,7 +148,7 @@ def train_lr(features: Input[Dataset], out_model: Output[Model]) -> NamedTuple('
 
 # Pipeline Component : Prediction with Scikit
 @dsl.component(
-    packages_to_install=['pandas', 'scikit-learn==1.3.2'],
+    packages_to_install=['numpy==1.26.4', 'pandas==2.1.4', 'scikit-learn==1.9.1'],
     base_image="python:3.12.7-slim"
 )
 def predict(model: Input[Model], features: Input[Dataset], results: Output[Dataset]):

@@ -1,22 +1,27 @@
-# Using python 3.12.7 slim image as the base image
-FROM python:3.12.7-slim
-# Defining working directory (within the container) and copy the requirements file. We will run the commands inside this new directory
+
+# Using Python 3.12.7 slim image as the base image
+FROM python:3.11.9-slim
+
+# Define working directory
 WORKDIR /usr/src/myapp
-# Copy requirements.txt  to the working directory
+
+# Copy requirements file
 COPY requirements.txt .
-# Install required python packages
+
+# Install required Python packages
 RUN pip install --no-cache-dir -r requirements.txt
-# Copy all files in prediction-ui local host directory to /usr/src/myapp in Docker container
+
+# Copy UI files
 COPY . .
-# Expose the port that our app runs in
+
+# Expose application port
 EXPOSE 5000
-# Environment Variables
-ENV PREDICTOR_API=http://predictor-api-server:5000/diabetes_predictor
-#Add some meta data if necessary
-LABEL diabetes.predictor.api="0.0.1-beta"
-# Run our App
-CMD ["python3","app.py"]
-# We can also use an ENTRYPOINT and a CMD
-# Run our App
-#ENTRYPOINT ["python3"]
-#CMD ["app.py"]
+
+# Prediction API address
+ENV PREDICTOR_API=http://predictor-api-server:5000/winrate_predictor
+
+# Application metadata
+LABEL winrate.predictor.ui="0.0.1-beta"
+
+# Run application
+CMD ["python3", "app.py"]

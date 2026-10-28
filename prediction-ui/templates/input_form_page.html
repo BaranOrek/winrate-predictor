@@ -1,38 +1,60 @@
+
 <html>
 <head>
-    <title>Diabetes Check Form</title>
+    <title>Football Match Predictor</title>
 </head>
 <body>
 
-<form action="/checkdiabetes" method="POST">
-    <h1> Check My Diabetes</h1>
-    <label for="ntp">Number of times pregnant:</label>
-    <input type="text" id="ntp" name="ntp" placeholder="ntp"> <br>
+<form action="/predict" method="POST">
+    <h1>Football Match Outcome Predictor</h1>
 
-    <label for="pgc">Plasma glucose concentration a 2 hours in an oral glucose tolerance test:</label>
-    <input type="text" id="pgc" name="pgc" placeholder="pgc"> <br>
+    <label for="league">League:</label>
+    <select id="league" name="league">
+        <option value="Premier League">Premier League</option>
+        <option value="La Liga">La Liga</option>
+        <option value="Bundesliga">Bundesliga</option>
+        <option value="Serie A">Serie A</option>
+        <option value="Ligue 1">Ligue 1</option>
+    </select> <br>
 
-    <label for="dbp">Diastolic blood pressure (mm Hg):</label>
-    <input type="text" id="dbp" name="dbp" placeholder="dbp"> <br>
+    <label for="elo_home">Home Team ELO:</label>
+    <input type="number" id="elo_home" name="elo_home" value="1600" required> <br>
 
-    <label for="tsft">Triceps skin fold thickness (mm):</label>
-    <input type="text" id="tsft" name="tsft" placeholder="tsft"> <br>
+    <label for="elo_away">Away Team ELO:</label>
+    <input type="number" id="elo_away" name="elo_away" value="1500" required> <br>
 
-    <label for="si">2-Hour serum insulin (mu U/ml):</label>
-    <input type="text" id="si" name="si" placeholder="si"> <br>
+    <label for="crowd_present">Crowd Present:</label>
+    <select id="crowd_present" name="crowd_present">
+        <option value="1">Yes</option>
+        <option value="0">No</option>
+    </select> <br>
 
-    <label for="bmi">Body mass index:</label>
-    <input type="text" id="bmi" name="bmi" placeholder="bmi"> <br>
+    <label for="stadium_capacity">Stadium Capacity:</label>
+    <input type="number" id="stadium_capacity" name="stadium_capacity" value="50000" required> <br>
 
-    <label for="dpf">Diabetes pedigree function:</label>
-    <input type="text" id="dpf" name="dpf" placeholder="dpf"> <br>
+    <label for="attendance_pct">Attendance Percentage (0-1):</label>
+    <input type="number" id="attendance_pct" name="attendance_pct" min="0" max="1" step="any" value="0.85" required> <br>
 
-    <label for="age">Age (years):</label>
-    <input type="text" id="age" name="age" placeholder="age"> <br>
-    <p><input type='submit' value='Check'/></p>
+    <label for="travel_distance_km">Travel Distance (km):</label>
+    <input type="number" id="travel_distance_km" name="travel_distance_km" min="0" value="200" required> <br>
+
+    <label for="timezones_crossed">Timezones Crossed:</label>
+    <input type="number" id="timezones_crossed" name="timezones_crossed" min="0" value="0" required> <br>
+
+    <label for="is_derby">Is Derby:</label>
+    <select id="is_derby" name="is_derby">
+        <option value="0">No</option>
+        <option value="1">Yes</option>
+    </select> <br>
+
+    <label for="venue_familiarity">Venue Familiarity:</label>
+    <select id="venue_familiarity" name="venue_familiarity">
+        <option value="1">Yes</option>
+        <option value="0">No</option>
+    </select> <br>
+
+    <p><input type="submit" value="Predict"/></p>
 </form>
 
 </body>
 </html>
-
-<!-- check https://flask.palletsprojects.com/en/2.3.x/tutorial/templates/ for information if needed -->

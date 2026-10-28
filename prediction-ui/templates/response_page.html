@@ -1,14 +1,27 @@
+
 <html>
 <head>
-    <title>Likelihood of Diabetes</title>
+    <title>Football Match Prediction Result</title>
 </head>
 <body>
 
-{% if prediction_variable==true %}
-    <p>It is likely that you may have diabetes.</p>
+<h1>Football Match Prediction Result</h1>
+
+{% if prediction_variable == "home_win" %}
+    <p>Predicted result: Home Win</p>
+{% elif prediction_variable == "away_win" %}
+    <p>Predicted result: Away Win</p>
 {% else %}
-    <p>It is unlikely that you have diabetes.</p>
+    <p>Predicted result: Draw</p>
 {% endif %}
+
+<h2>Outcome Probabilities</h2>
+
+<p>Home Win: {{ (probabilities["home_win"] * 100) | round(2) }}%</p>
+<p>Draw: {{ (probabilities["draw"] * 100) | round(2) }}%</p>
+<p>Away Win: {{ (probabilities["away_win"] * 100) | round(2) }}%</p>
+
+<a href="/predict">Predict Another Match</a>
+
 </body>
 </html>
-<!-- check https://flask.palletsprojects.com/en/2.3.x/tutorial/templates/ for information if needed -->

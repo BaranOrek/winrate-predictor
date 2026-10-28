@@ -1,0 +1,19 @@
+
+services:
+  predictor-api-server:
+    build:
+      context: .
+      dockerfile: prediction-api/Dockerfile
+    ports:
+      - "5002:5000"
+
+  prediction-ui:
+    build:
+      context: ./prediction-ui
+      dockerfile: Dockerfile
+    ports:
+      - "5003:5000"
+    environment:
+      PREDICTOR_API: http://predictor-api-server:5000/winrate_predictor
+    depends_on:
+      - predictor-api-server

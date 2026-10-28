@@ -1,12 +1,14 @@
 [
   {
-    "ntp": 1,
-    "pgc": 126,
-    "dbp": 60,
-    "tsft": 0,
-    "si": 0,
-    "bmi": 30.1,
-    "dpf": 0.349,
-    "age": 47
+    "league": "Premier League",
+    "elo_home": 1600,
+    "elo_away": 1500,
+    "crowd_present": 1,
+    "stadium_capacity": 50000,
+    "attendance_pct": 0.85,
+    "travel_distance_km": 200,
+    "timezones_crossed": 0,
+    "is_derby": 0,
+    "venue_familiarity": 1
   }
 ]

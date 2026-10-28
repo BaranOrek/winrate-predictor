@@ -1,3 +1,4 @@
+
 import json
 import os
 
@@ -8,7 +9,7 @@ from io import StringIO
 import pickle
 
 
-class DiabetesPredictor:
+class WinratePredictor:
     def __init__(self):
         self.model = None
 
@@ -27,13 +28,24 @@ class DiabetesPredictor:
                 self.load_model('model.pkl')
 
         df = pd.read_json(StringIO(json.dumps(prediction_input)), orient='records')
-        xNew = df[['ntp', 'pgc', 'dbp', 'tsft', 'si', 'bmi', 'dpf', 'age']]
+        xNew = df[['league', 'elo_home', 'elo_away', 'crowd_present',
+                   'stadium_capacity', 'attendance_pct', 'travel_distance_km',
+                   'timezones_crossed', 'is_derby', 'venue_familiarity']]
         y_pred = self.model.predict(xNew)
         print(y_pred)
         logging.info(y_pred[0])
-        status = (y_pred[0] > 0.5)
-        print(status)
-        return status
+
+        y_proba = self.model.predict_proba(xNew)
+
+        result = {
+            "prediction": str(y_pred[0]),
+            "probabilities": {
+                str(label): float(prob)
+                for label, prob in zip(self.model.classes_, y_proba[0])
+            }
+        }
+        print(result)
+        return result
 
     def load_model(self, file_path):
         self.model = pickle.load(open(file_path, 'rb'))

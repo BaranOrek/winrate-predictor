@@ -1,20 +1,17 @@
-# Using python 3.12.7 slim image as the base image
-FROM python:3.12.7-slim
-# Defining working directory and copy the requirements file. We will run the commands inside this new directory
+FROM python:3.11.9-slim
+
 WORKDIR /usr/src/myapp
-# Copy requirements.txt  to the working directory
-COPY requirements.txt .
-# Install required python packages
+
+COPY prediction-api/requirements.txt .
+
 RUN pip install --no-cache-dir -r requirements.txt
-# Copy all files in prediction-api local host directory to /usr/src/myapp in Docker container
-COPY . .
-# Expose the port that our app runs in
+
+COPY prediction-api/ .
+
+COPY models/model.pkl ./models/model.pkl
+
 EXPOSE 5000
-# Environment Variables
-ENV MODEL_REPO=/usr/src/myapp
-# Run our App
-CMD ["python3","app.py"]
-# We can also use an ENTRYPOINT and a CMD
-# Run our App
-#ENTRYPOINT ["python3"]
-#CMD ["app.py"]
+
+ENV MODEL_REPO=/usr/src/myapp/models
+
+CMD ["python3", "app.py"]
