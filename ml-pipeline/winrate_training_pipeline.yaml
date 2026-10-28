@@ -1,0 +1,616 @@
+# PIPELINE DEFINITION
+# Name: winrate-predictor-training-pipeline
+# Inputs:
+#    accuracy_threshold: float [Default: 0.49]
+#    data_bucket: str
+#    model_repo: str
+#    project_id: str
+#    testset_filename: str
+#    trainset_filename: str
+components:
+  comp-condition-1:
+    dag:
+      tasks:
+        upload-model-to-gcs:
+          cachingOptions:
+            enableCache: true
+          componentRef:
+            name: comp-upload-model-to-gcs
+          inputs:
+            artifacts:
+              model:
+                componentInputArtifact: pipelinechannel--train-logistic-regression-out_model
+            parameters:
+              model_repo:
+                componentInputParameter: pipelinechannel--model_repo
+              project_id:
+                componentInputParameter: pipelinechannel--project_id
+          taskInfo:
+            name: upload-model-to-gcs
+    inputDefinitions:
+      artifacts:
+        pipelinechannel--train-logistic-regression-out_model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+      parameters:
+        pipelinechannel--accuracy_threshold:
+          parameterType: NUMBER_DOUBLE
+        pipelinechannel--evaluate-model-Output:
+          parameterType: NUMBER_DOUBLE
+        pipelinechannel--model_repo:
+          parameterType: STRING
+        pipelinechannel--project_id:
+          parameterType: STRING
+  comp-download-data:
+    executorLabel: exec-download-data
+    inputDefinitions:
+      parameters:
+        bucket:
+          parameterType: STRING
+        file_name:
+          parameterType: STRING
+        project_id:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-download-data-2:
+    executorLabel: exec-download-data-2
+    inputDefinitions:
+      parameters:
+        bucket:
+          parameterType: STRING
+        file_name:
+          parameterType: STRING
+        project_id:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-evaluate-model:
+    executorLabel: exec-evaluate-model
+    inputDefinitions:
+      artifacts:
+        model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+        test_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        evaluation_metrics:
+          artifactType:
+            schemaTitle: system.Metrics
+            schemaVersion: 0.0.1
+      parameters:
+        Output:
+          parameterType: NUMBER_DOUBLE
+  comp-preprocess-data:
+    executorLabel: exec-preprocess-data
+    inputDefinitions:
+      artifacts:
+        test_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        train_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        test_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        train_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-smoke-test:
+    executorLabel: exec-smoke-test
+    inputDefinitions:
+      artifacts:
+        model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+        test_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-train-logistic-regression:
+    executorLabel: exec-train-logistic-regression
+    inputDefinitions:
+      artifacts:
+        train_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        out_model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+  comp-upload-model-to-gcs:
+    executorLabel: exec-upload-model-to-gcs
+    inputDefinitions:
+      artifacts:
+        model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+      parameters:
+        model_repo:
+          parameterType: STRING
+        project_id:
+          parameterType: STRING
+deploymentSpec:
+  executors:
+    exec-download-data:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - download_data
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'google-cloud-storage'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.15.2'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef download_data(project_id: str, bucket: str, file_name: str, dataset:\
+          \ Output[Dataset]):\n    \"\"\"Download a CSV file from Google Cloud Storage.\"\
+          \"\"\n    from google.cloud import storage\n    import logging\n    import\
+          \ sys\n\n    logging.basicConfig(stream=sys.stdout, level=logging.INFO)\n\
+          \    client = storage.Client(project=project_id)\n    storage_bucket = client.bucket(bucket)\n\
+          \    blob = storage_bucket.blob(file_name)\n    blob.download_to_filename(dataset.path\
+          \ + \".csv\")\n    logging.info(\"Downloaded gs://%s/%s\", bucket, file_name)\n\
+          \n"
+        image: python:3.11.9-slim
+    exec-download-data-2:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - download_data
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'google-cloud-storage'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.15.2'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef download_data(project_id: str, bucket: str, file_name: str, dataset:\
+          \ Output[Dataset]):\n    \"\"\"Download a CSV file from Google Cloud Storage.\"\
+          \"\"\n    from google.cloud import storage\n    import logging\n    import\
+          \ sys\n\n    logging.basicConfig(stream=sys.stdout, level=logging.INFO)\n\
+          \    client = storage.Client(project=project_id)\n    storage_bucket = client.bucket(bucket)\n\
+          \    blob = storage_bucket.blob(file_name)\n    blob.download_to_filename(dataset.path\
+          \ + \".csv\")\n    logging.info(\"Downloaded gs://%s/%s\", bucket, file_name)\n\
+          \n"
+        image: python:3.11.9-slim
+    exec-evaluate-model:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - evaluate_model
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'numpy==1.26.4'\
+          \ 'pandas==2.1.4' 'scikit-learn==1.9.1'  &&  python3 -m pip install --quiet\
+          \ --no-warn-script-location 'kfp==2.15.2' '--no-deps' 'typing-extensions>=3.7.4,<5;\
+          \ python_version<\"3.9\"' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef evaluate_model(\n    model: Input[Model],\n    test_dataset:\
+          \ Input[Dataset],\n    evaluation_metrics: Output[Metrics]\n) -> float:\n\
+          \    \"\"\"Evaluate multiclass predictions on the fixed holdout set.\"\"\
+          \"\n    import pandas as pd\n    import pickle\n    import logging\n   \
+          \ import sys\n    from sklearn.metrics import accuracy_score, f1_score\n\
+          \n    logging.basicConfig(stream=sys.stdout, level=logging.INFO)\n    df\
+          \ = pd.read_csv(test_dataset.path + \".csv\")\n    feature_columns = [\n\
+          \        \"league\", \"elo_home\", \"elo_away\", \"crowd_present\",\n  \
+          \      \"stadium_capacity\", \"attendance_pct\", \"travel_distance_km\"\
+          ,\n        \"timezones_crossed\", \"is_derby\", \"venue_familiarity\"\n\
+          \    ]\n    with open(model.path + \".pkl\", \"rb\") as file:\n        trained_model\
+          \ = pickle.load(file)\n\n    predictions = trained_model.predict(df[feature_columns])\n\
+          \    accuracy = float(accuracy_score(df[\"home_result\"], predictions))\n\
+          \    macro_f1 = float(f1_score(df[\"home_result\"], predictions, average=\"\
+          macro\", zero_division=0))\n    evaluation_metrics.log_metric(\"accuracy\"\
+          , accuracy)\n    evaluation_metrics.log_metric(\"macro_f1\", macro_f1)\n\
+          \    logging.info(\"Fixed test accuracy: %.4f; macro-F1: %.4f\", accuracy,\
+          \ macro_f1)\n    return accuracy\n\n"
+        image: python:3.11.9-slim
+    exec-preprocess-data:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - preprocess_data
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'pandas==2.1.4'\
+          \ 'numpy==1.26.4'  &&  python3 -m pip install --quiet --no-warn-script-location\
+          \ 'kfp==2.15.2' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"\
+          3.9\"' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef preprocess_data(\n    train_data: Input[Dataset],\n    test_data:\
+          \ Input[Dataset],\n    train_dataset: Output[Dataset],\n    test_dataset:\
+          \ Output[Dataset]\n):\n    \"\"\"Select the same model inputs used in the\
+          \ local notebook.\"\"\"\n    import pandas as pd\n    import logging\n \
+          \   import sys\n\n    logging.basicConfig(stream=sys.stdout, level=logging.INFO)\n\
+          \    feature_columns = [\n        \"league\", \"elo_home\", \"elo_away\"\
+          , \"crowd_present\",\n        \"stadium_capacity\", \"attendance_pct\",\
+          \ \"travel_distance_km\",\n        \"timezones_crossed\", \"is_derby\",\
+          \ \"venue_familiarity\"\n    ]\n    selected_columns = feature_columns +\
+          \ [\"home_result\"]\n\n    train_df = pd.read_csv(train_data.path + \".csv\"\
+          )\n    test_df = pd.read_csv(test_data.path + \".csv\")\n\n    # Keep the\
+          \ original fixed holdout; do not randomly split it again.\n    train_df\
+          \ = train_df[selected_columns].copy()\n    test_df = test_df[selected_columns].copy()\n\
+          \n    if train_df.empty or test_df.empty:\n        raise ValueError(\"Training\
+          \ and test datasets must not be empty.\")\n    if train_df[selected_columns].isna().any().any()\
+          \ or test_df[selected_columns].isna().any().any():\n        raise ValueError(\"\
+          Selected model columns contain missing values.\")\n\n    train_df.to_csv(train_dataset.path\
+          \ + \".csv\", index=False)\n    test_df.to_csv(test_dataset.path + \".csv\"\
+          , index=False)\n    logging.info(\"Prepared %d training rows and %d test\
+          \ rows\", len(train_df), len(test_df))\n\n"
+        image: python:3.11.9-slim
+    exec-smoke-test:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - smoke_test
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'numpy==1.26.4'\
+          \ 'pandas==2.1.4' 'scikit-learn==1.9.1'  &&  python3 -m pip install --quiet\
+          \ --no-warn-script-location 'kfp==2.15.2' '--no-deps' 'typing-extensions>=3.7.4,<5;\
+          \ python_version<\"3.9\"' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef smoke_test(model: Input[Model], test_dataset: Input[Dataset]):\n\
+          \    \"\"\"Check that the serialized model predicts and returns valid probabilities.\"\
+          \"\"\n    import pandas as pd\n    import pickle\n    import logging\n \
+          \   import sys\n    import numpy as np\n\n    logging.basicConfig(stream=sys.stdout,\
+          \ level=logging.INFO)\n    feature_columns = [\n        \"league\", \"elo_home\"\
+          , \"elo_away\", \"crowd_present\",\n        \"stadium_capacity\", \"attendance_pct\"\
+          , \"travel_distance_km\",\n        \"timezones_crossed\", \"is_derby\",\
+          \ \"venue_familiarity\"\n    ]\n    df = pd.read_csv(test_dataset.path +\
+          \ \".csv\")\n    sample = df.iloc[:3][feature_columns]\n    if len(sample)\
+          \ != 3:\n        raise ValueError(\"Smoke test requires at least three test\
+          \ rows.\")\n\n    with open(model.path + \".pkl\", \"rb\") as file:\n  \
+          \      trained_model = pickle.load(file)\n    predictions = trained_model.predict(sample)\n\
+          \    probabilities = trained_model.predict_proba(sample)\n\n    if not np.isfinite(probabilities).all()\
+          \ or not np.allclose(probabilities.sum(axis=1), 1.0):\n        raise ValueError(\"\
+          Smoke test produced invalid class probabilities.\")\n    if not set(predictions).issubset({\"\
+          home_win\", \"draw\", \"away_win\"}):\n        raise ValueError(\"Smoke\
+          \ test produced an unexpected class label.\")\n    logging.info(\"Smoke\
+          \ test predictions: %s\", predictions.tolist())\n\n"
+        image: python:3.11.9-slim
+    exec-train-logistic-regression:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - train_logistic_regression
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'numpy==1.26.4'\
+          \ 'pandas==2.1.4' 'scikit-learn==1.9.1'  &&  python3 -m pip install --quiet\
+          \ --no-warn-script-location 'kfp==2.15.2' '--no-deps' 'typing-extensions>=3.7.4,<5;\
+          \ python_version<\"3.9\"' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef train_logistic_regression(train_dataset: Input[Dataset], out_model:\
+          \ Output[Model]):\n    \"\"\"Fit and serialize preprocessing plus Logistic\
+          \ Regression together.\"\"\"\n    import pandas as pd\n    import pickle\n\
+          \    import logging\n    import sys\n    from sklearn.compose import ColumnTransformer\n\
+          \    from sklearn.preprocessing import OneHotEncoder, StandardScaler\n \
+          \   from sklearn.linear_model import LogisticRegression\n    from sklearn.pipeline\
+          \ import Pipeline\n\n    logging.basicConfig(stream=sys.stdout, level=logging.INFO)\n\
+          \    df = pd.read_csv(train_dataset.path + \".csv\")\n    feature_columns\
+          \ = [\n        \"league\", \"elo_home\", \"elo_away\", \"crowd_present\"\
+          ,\n        \"stadium_capacity\", \"attendance_pct\", \"travel_distance_km\"\
+          ,\n        \"timezones_crossed\", \"is_derby\", \"venue_familiarity\"\n\
+          \    ]\n    numeric_columns = [column for column in feature_columns if column\
+          \ != \"league\"]\n\n    preprocessing = ColumnTransformer(\n        transformers=[\n\
+          \            (\"categorical\", OneHotEncoder(handle_unknown=\"ignore\"),\
+          \ [\"league\"]),\n            (\"numeric\", StandardScaler(), numeric_columns)\n\
+          \        ]\n    )\n    model = Pipeline(steps=[\n        (\"preprocessing\"\
+          , preprocessing),\n        (\"classifier\", LogisticRegression(C=0.01, class_weight=None,\
+          \ max_iter=1000, random_state=42))\n    ])\n    model.fit(df[feature_columns],\
+          \ df[\"home_result\"])\n\n    out_model.metadata[\"file_type\"] = \".pkl\"\
+          \n    out_model.metadata[\"algo\"] = \"logistic_regression\"\n    with open(out_model.path\
+          \ + \".pkl\", \"wb\") as file:\n        pickle.dump(model, file)\n    logging.info(\"\
+          Trained Logistic Regression on %d rows\", len(df))\n\n"
+        image: python:3.11.9-slim
+    exec-upload-model-to-gcs:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - upload_model_to_gcs
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'google-cloud-storage'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.15.2'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef upload_model_to_gcs(project_id: str, model_repo: str, model:\
+          \ Input[Model]):\n    \"\"\"Publish the model at the path consumed by the\
+          \ existing CI/CD pipeline.\"\"\"\n    from google.cloud import storage\n\
+          \    import logging\n    import sys\n\n    logging.basicConfig(stream=sys.stdout,\
+          \ level=logging.INFO)\n    client = storage.Client(project=project_id)\n\
+          \    bucket = client.bucket(model_repo)\n    blob = bucket.blob(\"model.pkl\"\
+          )\n    blob.upload_from_filename(model.path + \".pkl\")\n    logging.info(\"\
+          Uploaded model to gs://%s/model.pkl\", model_repo)\n\n"
+        image: python:3.11.9-slim
+pipelineInfo:
+  name: winrate-predictor-training-pipeline
+root:
+  dag:
+    tasks:
+      condition-1:
+        componentRef:
+          name: comp-condition-1
+        dependentTasks:
+        - evaluate-model
+        - smoke-test
+        - train-logistic-regression
+        inputs:
+          artifacts:
+            pipelinechannel--train-logistic-regression-out_model:
+              taskOutputArtifact:
+                outputArtifactKey: out_model
+                producerTask: train-logistic-regression
+          parameters:
+            pipelinechannel--accuracy_threshold:
+              componentInputParameter: accuracy_threshold
+            pipelinechannel--evaluate-model-Output:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: evaluate-model
+            pipelinechannel--model_repo:
+              componentInputParameter: model_repo
+            pipelinechannel--project_id:
+              componentInputParameter: project_id
+        taskInfo:
+          name: condition-1
+        triggerPolicy:
+          condition: inputs.parameter_values['pipelinechannel--evaluate-model-Output']
+            >= inputs.parameter_values['pipelinechannel--accuracy_threshold']
+      download-data:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-download-data
+        inputs:
+          parameters:
+            bucket:
+              componentInputParameter: data_bucket
+            file_name:
+              componentInputParameter: trainset_filename
+            project_id:
+              componentInputParameter: project_id
+        taskInfo:
+          name: download-data
+      download-data-2:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-download-data-2
+        inputs:
+          parameters:
+            bucket:
+              componentInputParameter: data_bucket
+            file_name:
+              componentInputParameter: testset_filename
+            project_id:
+              componentInputParameter: project_id
+        taskInfo:
+          name: download-data-2
+      evaluate-model:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-evaluate-model
+        dependentTasks:
+        - preprocess-data
+        - train-logistic-regression
+        inputs:
+          artifacts:
+            model:
+              taskOutputArtifact:
+                outputArtifactKey: out_model
+                producerTask: train-logistic-regression
+            test_dataset:
+              taskOutputArtifact:
+                outputArtifactKey: test_dataset
+                producerTask: preprocess-data
+        taskInfo:
+          name: evaluate-model
+      preprocess-data:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-preprocess-data
+        dependentTasks:
+        - download-data
+        - download-data-2
+        inputs:
+          artifacts:
+            test_data:
+              taskOutputArtifact:
+                outputArtifactKey: dataset
+                producerTask: download-data-2
+            train_data:
+              taskOutputArtifact:
+                outputArtifactKey: dataset
+                producerTask: download-data
+        taskInfo:
+          name: preprocess-data
+      smoke-test:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-smoke-test
+        dependentTasks:
+        - evaluate-model
+        - preprocess-data
+        - train-logistic-regression
+        inputs:
+          artifacts:
+            model:
+              taskOutputArtifact:
+                outputArtifactKey: out_model
+                producerTask: train-logistic-regression
+            test_dataset:
+              taskOutputArtifact:
+                outputArtifactKey: test_dataset
+                producerTask: preprocess-data
+        taskInfo:
+          name: smoke-test
+      train-logistic-regression:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-train-logistic-regression
+        dependentTasks:
+        - preprocess-data
+        inputs:
+          artifacts:
+            train_dataset:
+              taskOutputArtifact:
+                outputArtifactKey: train_dataset
+                producerTask: preprocess-data
+        taskInfo:
+          name: train-logistic-regression
+  inputDefinitions:
+    parameters:
+      accuracy_threshold:
+        defaultValue: 0.49
+        isOptional: true
+        parameterType: NUMBER_DOUBLE
+      data_bucket:
+        parameterType: STRING
+      model_repo:
+        parameterType: STRING
+      project_id:
+        parameterType: STRING
+      testset_filename:
+        parameterType: STRING
+      trainset_filename:
+        parameterType: STRING
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.15.2

@@ -1,314 +1,286 @@
-import kfp
 import argparse
-import typing
-from typing import Dict
-from typing import NamedTuple
-from kfp import dsl
-from kfp.dsl import (Artifact,
-                     Dataset,
-                     Input,
-                     Model,
-                     Output,
-                     Metrics,
-                     ClassificationMetrics,
-                     component,
-                     OutputPath,
-                     InputPath)
+import kfp
+from kfp import dsl, compiler
+from kfp.dsl import Dataset, Input, Output, Model, Metrics
 import google.cloud.aiplatform as aip
-from google_cloud_pipeline_components.types import artifact_types
-from kfp import compiler
 
 
-# Pipeline Component : Data Ingestion
-@dsl.component(
-    packages_to_install=["pandas", "google-cloud-storage"],
-    base_image="python:3.12.7-slim"
-)
-def download_data(project_id: str, bucket: str, file_name: str, dataset: Output[Dataset]):
-    '''download data'''
-    from google.cloud import storage
-    import pandas as pd
-    import logging
-    import sys
-
-    logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-
-    # Downloading the file from a Google bucket
-    client = storage.Client(project=project_id)
-    bucket = client.bucket(bucket)
-    blob = bucket.blob(file_name)
-    blob.download_to_filename(dataset.path + ".csv")
-    logging.info('Downloaded Data!')
-
-
-# Pipeline Component : Training Decision Tree Classifier
-@dsl.component(
-    packages_to_install=['numpy==1.26.4', 'pandas==2.1.4', 'scikit-learn==1.9.1'],
-    base_image="python:3.12.7-slim"
-)
-def train_dt(features: Input[Dataset], out_model: Output[Model]) -> NamedTuple('outputs', metrics=dict):
-    '''train a DT with default parameters'''
-    import pandas as pd
-    from sklearn.linear_model import LogisticRegression
-    from sklearn import metrics
-    from sklearn.model_selection import train_test_split
-    from sklearn.tree import DecisionTreeClassifier
-    from sklearn.metrics import accuracy_score, recall_score
-    import json
-    import logging
-    import sys
-    import os
-    import pickle
-
-    logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-
-    df = pd.read_csv(features.path + ".csv")
-    logging.info(df.columns)
-
-    train_X, val_X, train_y, val_y = train_test_split(df.drop('class', axis=1),
-                                                      df['class'], test_size=0.30,
-                                                      random_state=42)
-
-    model_dt = DecisionTreeClassifier(criterion="gini", random_state=42)
-    # Fit the model
-    model_dt.fit(train_X, train_y)
-    # Evaluate the model
-    val_predictions = model_dt.predict(val_X)
-    accuracy = accuracy_score(val_y, val_predictions)
-    recall = recall_score(val_y, val_predictions)
-
-    metrics_dict = {
-        "accuracy": accuracy,
-        "recall": recall,
-    }
-    logging.info(metrics_dict)
-
-    out_model.metadata["file_type"] = ".pkl"
-    out_model.metadata["algo"] = "dt"
-    # Save the model
-    m_file = out_model.path + ".pkl"
-    with open(m_file, 'wb') as f:
-        pickle.dump(model_dt, f)
-
-    outputs = NamedTuple('outputs', metrics=dict)
-    return outputs(metrics_dict)
-
-
-# Pipeline Component : Training Logistic Regression
-@dsl.component(
-    packages_to_install=['numpy==1.26.4', 'pandas==2.1.4', 'scikit-learn==1.9.1'],
-    base_image="python:3.12.7-slim"
-)
-def train_lr(features: Input[Dataset], out_model: Output[Model]) -> NamedTuple('outputs', metrics=dict):
-    '''train a LogisticRegression with default parameters'''
-    import pandas as pd
-    from sklearn.linear_model import LogisticRegression
-    from sklearn import metrics
-    from sklearn.model_selection import train_test_split
-    from sklearn.metrics import accuracy_score, recall_score
-    import json
-    import logging
-    import sys
-    import os
-    import pickle
-
-    logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-
-    df = pd.read_csv(features.path + ".csv")
-
-    logging.info(df.columns)
-
-    x_train, x_test, y_train, y_test = train_test_split(df.drop('class', axis=1),
-                                                        df['class'], test_size=0.30,
-                                                        random_state=101)
-    model_lr = LogisticRegression()
-    model_lr.fit(x_train, y_train)
-
-    # Evaluate the model
-    predictions = model_lr.predict(x_test)
-    accuracy = accuracy_score(y_test, predictions)
-    recall = recall_score(y_test, predictions)
-
-    metrics_dict = {
-        "accuracy": accuracy,
-        "recall": recall,
-    }
-    logging.info(metrics_dict)
-
-    out_model.metadata["file_type"] = ".pkl"
-    out_model.metadata["algo"] = "lr"
-    # Save the model
-    m_file = out_model.path + ".pkl"
-    with open(m_file, 'wb') as f:
-        pickle.dump(model_lr, f)
-
-    outputs = NamedTuple('outputs', metrics=dict)
-    return outputs(metrics_dict)
-
-
-# Pipeline Component : Prediction with Scikit
-@dsl.component(
-    packages_to_install=['numpy==1.26.4', 'pandas==2.1.4', 'scikit-learn==1.9.1'],
-    base_image="python:3.12.7-slim"
-)
-def predict(model: Input[Model], features: Input[Dataset], results: Output[Dataset]):
-    import pandas as pd
-    import pickle
-    import json
-    import logging
-    import sys
-    import os
-
-    logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-
-    df = pd.read_csv(features.path + ".csv")
-
-    filename = model.path + ".pkl"
-
-    # Loading the saved model
-    model_sk = pickle.load(open(filename, 'rb'))
-
-    xNew = df[['ntp', 'pgc', 'dbp', 'tsft', 'si', 'bmi', 'dpf', 'age']]
-
-    dfcp = df.copy()
-    y_classes = model_sk.predict(xNew)
-    logging.info(y_classes)
-    dfcp['pclass'] = y_classes.tolist()
-    dfcp.to_csv(results.path + ".csv", index=False, encoding='utf-8-sig')
-
-
-# Pipeline Component : Algorithm Selection
-
-@dsl.component(
-    base_image="python:3.12.7-slim"
-)
-def compare_model(dt_metrics: dict, lr_metrics: dict) -> str:
-    import logging
-    import json
-    import sys
-    logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-    logging.info(dt_metrics)
-    logging.info(lr_metrics)
-    if dt_metrics.get("accuracy") > lr_metrics.get("accuracy"):
-        return "DT"
-    else:
-        return "LR"
-
-
-# Upload Model and Metrics to Google Bucket
-
+# Pipeline Component: Data Ingestion
 @dsl.component(
     packages_to_install=["google-cloud-storage"],
-    base_image="python:3.12.7-slim"
+    base_image="python:3.11.9-slim"
 )
-def upload_model_to_gcs(project_id: str, model_repo: str, model: Input[Model]):
-    '''upload model to gsc'''
+def download_data(project_id: str, bucket: str, file_name: str, dataset: Output[Dataset]):
+    """Download a CSV file from Google Cloud Storage."""
     from google.cloud import storage
     import logging
     import sys
 
     logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+    client = storage.Client(project=project_id)
+    storage_bucket = client.bucket(bucket)
+    blob = storage_bucket.blob(file_name)
+    blob.download_to_filename(dataset.path + ".csv")
+    logging.info("Downloaded gs://%s/%s", bucket, file_name)
 
-    # upload the model to GCS
+
+# Pipeline Component: Data Preprocessing
+@dsl.component(
+    packages_to_install=["pandas==2.1.4", "numpy==1.26.4"],
+    base_image="python:3.11.9-slim"
+)
+def preprocess_data(
+    train_data: Input[Dataset],
+    test_data: Input[Dataset],
+    train_dataset: Output[Dataset],
+    test_dataset: Output[Dataset]
+):
+    """Select the same model inputs used in the local notebook."""
+    import pandas as pd
+    import logging
+    import sys
+
+    logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+    feature_columns = [
+        "league", "elo_home", "elo_away", "crowd_present",
+        "stadium_capacity", "attendance_pct", "travel_distance_km",
+        "timezones_crossed", "is_derby", "venue_familiarity"
+    ]
+    selected_columns = feature_columns + ["home_result"]
+
+    train_df = pd.read_csv(train_data.path + ".csv")
+    test_df = pd.read_csv(test_data.path + ".csv")
+
+    # Keep the original fixed holdout; do not randomly split it again.
+    train_df = train_df[selected_columns].copy()
+    test_df = test_df[selected_columns].copy()
+
+    if train_df.empty or test_df.empty:
+        raise ValueError("Training and test datasets must not be empty.")
+    if train_df[selected_columns].isna().any().any() or test_df[selected_columns].isna().any().any():
+        raise ValueError("Selected model columns contain missing values.")
+
+    train_df.to_csv(train_dataset.path + ".csv", index=False)
+    test_df.to_csv(test_dataset.path + ".csv", index=False)
+    logging.info("Prepared %d training rows and %d test rows", len(train_df), len(test_df))
+
+
+# Pipeline Component: Logistic Regression Training
+@dsl.component(
+    packages_to_install=["numpy==1.26.4", "pandas==2.1.4", "scikit-learn==1.9.1"],
+    base_image="python:3.11.9-slim"
+)
+def train_logistic_regression(train_dataset: Input[Dataset], out_model: Output[Model]):
+    """Fit and serialize preprocessing plus Logistic Regression together."""
+    import pandas as pd
+    import pickle
+    import logging
+    import sys
+    from sklearn.compose import ColumnTransformer
+    from sklearn.preprocessing import OneHotEncoder, StandardScaler
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.pipeline import Pipeline
+
+    logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+    df = pd.read_csv(train_dataset.path + ".csv")
+    feature_columns = [
+        "league", "elo_home", "elo_away", "crowd_present",
+        "stadium_capacity", "attendance_pct", "travel_distance_km",
+        "timezones_crossed", "is_derby", "venue_familiarity"
+    ]
+    numeric_columns = [column for column in feature_columns if column != "league"]
+
+    preprocessing = ColumnTransformer(
+        transformers=[
+            ("categorical", OneHotEncoder(handle_unknown="ignore"), ["league"]),
+            ("numeric", StandardScaler(), numeric_columns)
+        ]
+    )
+    model = Pipeline(steps=[
+        ("preprocessing", preprocessing),
+        ("classifier", LogisticRegression(C=0.01, class_weight=None, max_iter=1000, random_state=42))
+    ])
+    model.fit(df[feature_columns], df["home_result"])
+
+    out_model.metadata["file_type"] = ".pkl"
+    out_model.metadata["algo"] = "logistic_regression"
+    with open(out_model.path + ".pkl", "wb") as file:
+        pickle.dump(model, file)
+    logging.info("Trained Logistic Regression on %d rows", len(df))
+
+
+# Pipeline Component: Model Evaluation
+@dsl.component(
+    packages_to_install=["numpy==1.26.4", "pandas==2.1.4", "scikit-learn==1.9.1"],
+    base_image="python:3.11.9-slim"
+)
+def evaluate_model(
+    model: Input[Model],
+    test_dataset: Input[Dataset],
+    evaluation_metrics: Output[Metrics]
+) -> float:
+    """Evaluate multiclass predictions on the fixed holdout set."""
+    import pandas as pd
+    import pickle
+    import logging
+    import sys
+    from sklearn.metrics import accuracy_score, f1_score
+
+    logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+    df = pd.read_csv(test_dataset.path + ".csv")
+    feature_columns = [
+        "league", "elo_home", "elo_away", "crowd_present",
+        "stadium_capacity", "attendance_pct", "travel_distance_km",
+        "timezones_crossed", "is_derby", "venue_familiarity"
+    ]
+    with open(model.path + ".pkl", "rb") as file:
+        trained_model = pickle.load(file)
+
+    predictions = trained_model.predict(df[feature_columns])
+    accuracy = float(accuracy_score(df["home_result"], predictions))
+    macro_f1 = float(f1_score(df["home_result"], predictions, average="macro", zero_division=0))
+    evaluation_metrics.log_metric("accuracy", accuracy)
+    evaluation_metrics.log_metric("macro_f1", macro_f1)
+    logging.info("Fixed test accuracy: %.4f; macro-F1: %.4f", accuracy, macro_f1)
+    return accuracy
+
+
+# Pipeline Component: Smoke Test
+@dsl.component(
+    packages_to_install=["numpy==1.26.4", "pandas==2.1.4", "scikit-learn==1.9.1"],
+    base_image="python:3.11.9-slim"
+)
+def smoke_test(model: Input[Model], test_dataset: Input[Dataset]):
+    """Check that the serialized model predicts and returns valid probabilities."""
+    import pandas as pd
+    import pickle
+    import logging
+    import sys
+    import numpy as np
+
+    logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+    feature_columns = [
+        "league", "elo_home", "elo_away", "crowd_present",
+        "stadium_capacity", "attendance_pct", "travel_distance_km",
+        "timezones_crossed", "is_derby", "venue_familiarity"
+    ]
+    df = pd.read_csv(test_dataset.path + ".csv")
+    sample = df.iloc[:3][feature_columns]
+    if len(sample) != 3:
+        raise ValueError("Smoke test requires at least three test rows.")
+
+    with open(model.path + ".pkl", "rb") as file:
+        trained_model = pickle.load(file)
+    predictions = trained_model.predict(sample)
+    probabilities = trained_model.predict_proba(sample)
+
+    if not np.isfinite(probabilities).all() or not np.allclose(probabilities.sum(axis=1), 1.0):
+        raise ValueError("Smoke test produced invalid class probabilities.")
+    if not set(predictions).issubset({"home_win", "draw", "away_win"}):
+        raise ValueError("Smoke test produced an unexpected class label.")
+    logging.info("Smoke test predictions: %s", predictions.tolist())
+
+
+# Pipeline Component: Upload Model
+@dsl.component(
+    packages_to_install=["google-cloud-storage"],
+    base_image="python:3.11.9-slim"
+)
+def upload_model_to_gcs(project_id: str, model_repo: str, model: Input[Model]):
+    """Publish the model at the path consumed by the existing CI/CD pipeline."""
+    from google.cloud import storage
+    import logging
+    import sys
+
+    logging.basicConfig(stream=sys.stdout, level=logging.INFO)
     client = storage.Client(project=project_id)
     bucket = client.bucket(model_repo)
-    mb_path = str(model.metadata["algo"]) + '/' + str(model.metadata["algo"]) + '_model' + str(
-        model.metadata["file_type"])
-    blob = bucket.blob(mb_path)
-    blob.upload_from_filename(model.path + str(model.metadata["file_type"]))
-    logging.info("Saved the model to the folder : " + mb_path + "in the bucket" + model_repo)
+    blob = bucket.blob("model.pkl")
+    blob.upload_from_filename(model.path + ".pkl")
+    logging.info("Uploaded model to gs://%s/model.pkl", model_repo)
 
 
 # Define the workflow of the pipeline.
-@kfp.dsl.pipeline(
-    name="diabetes-predictor-training-pipeline")
-def ml_pipeline(project_id: str, data_bucket: str, trainset_filename: str, model_repo: str, testset_filename: str):
-    di_op = download_data(
-        project_id=project_id,
-        bucket=data_bucket,
-        file_name=trainset_filename
+@kfp.dsl.pipeline(name="winrate-predictor-training-pipeline")
+def ml_pipeline(
+    project_id: str,
+    data_bucket: str,
+    trainset_filename: str,
+    testset_filename: str,
+    model_repo: str,
+    accuracy_threshold: float = 0.49
+):
+    training_data = download_data(
+        project_id=project_id, bucket=data_bucket, file_name=trainset_filename
     )
-
-    training_dt_job_run_op = train_dt(
-        features=di_op.outputs["dataset"]
+    test_data = download_data(
+        project_id=project_id, bucket=data_bucket, file_name=testset_filename
     )
-
-    training_lr_job_run_op = train_lr(
-        features=di_op.outputs["dataset"]
+    prepared_data = preprocess_data(
+        train_data=training_data.outputs["dataset"],
+        test_data=test_data.outputs["dataset"]
     )
+    training_job = train_logistic_regression(
+        train_dataset=prepared_data.outputs["train_dataset"]
+    )
+    evaluation_job = evaluate_model(
+        model=training_job.outputs["out_model"],
+        test_dataset=prepared_data.outputs["test_dataset"]
+    )
+    smoke_test_job = smoke_test(
+        model=training_job.outputs["out_model"],
+        test_dataset=prepared_data.outputs["test_dataset"]
+    ).after(evaluation_job)
 
-    pre_di_op = download_data(
-        project_id=project_id,
-        bucket=data_bucket,
-        file_name=testset_filename
-    ).after(training_dt_job_run_op, training_lr_job_run_op)
-
-    comp_model__op = compare_model(dt_metrics=training_dt_job_run_op.outputs["metrics"],
-                                   lr_metrics=training_lr_job_run_op.outputs["metrics"]).after(training_dt_job_run_op,
-                                                                                               training_lr_job_run_op)
-
-    # defining the branching condition
-    with dsl.If(comp_model__op.output == "DT"):
-        predict_dt_job_run_op = predict(
-            model=training_dt_job_run_op.outputs["out_model"],
-            features=pre_di_op.outputs["dataset"]
-        )
-        upload_model_dt_to_gc_op = upload_model_to_gcs(
+    # Publish only when the model passes the accuracy gate and smoke test.
+    with dsl.If(evaluation_job.outputs["Output"] >= accuracy_threshold):
+        upload_model_to_gcs(
             project_id=project_id,
             model_repo=model_repo,
-            model=training_dt_job_run_op.outputs['out_model']
-        ).after(predict_dt_job_run_op)
-
-    with dsl.If(comp_model__op.output == "LR"):
-        predict_lr_job_run_op = predict(
-            model=training_lr_job_run_op.outputs["out_model"],
-            features=pre_di_op.outputs["dataset"]
-        )
-        upload_model_lr_to_gc_op = upload_model_to_gcs(
-            project_id=project_id,
-            model_repo=model_repo,
-            model=training_lr_job_run_op.outputs['out_model']
-        ).after(predict_lr_job_run_op)
+            model=training_job.outputs["out_model"]
+        ).after(smoke_test_job)
 
 
 def compile_pipeline(target_file):
-    compiler.Compiler().compile(pipeline_func=ml_pipeline,
-                                package_path=target_file)
+    compiler.Compiler().compile(pipeline_func=ml_pipeline, package_path=target_file)
 
-# This is only for testing - run the pipeline via CI/CD as we did in Lab4 Live
+
 def _run_pipeline():
-    # The Google Cloud project that this pipeline runs in.
-    PROJECT_ID = "your project id"
-    # The region that this pipeline runs in
+    PROJECT_ID = "winrate-project-512916"
     REGION = "us-central1"
-    # Specify a Cloud Storage URI that your pipelines service account can access. The artifacts of your pipeline runs are stored within the pipeline root.
-    PIPELINE_ROOT = "gs://your temp bucket"
-    # Prepare the pipeline job
+    PIPELINE_ROOT = "gs://winrate-temp-2171997/vertex-pipelines"
+
+    aip.init(project=PROJECT_ID, location=REGION)
     job = aip.PipelineJob(
-        display_name="diabetes-predictor-ct-pipeline",
+        display_name="winrate-predictor-training-pipeline",
         enable_caching=False,
-        template_path="training_pipeline.yaml",
+        template_path="winrate_training_pipeline.yaml",
         pipeline_root=PIPELINE_ROOT,
         location=REGION,
         parameter_values={
-            'project_id': PROJECT_ID,  # makesure to use your project id
-            'data_bucket': 'de2026_data',  # makesure to use your data bucket name
-            'trainset_filename': 'training_set.csv',
-            # makesure to upload these to your data bucket from DE2026/lab4/data
-            'testset_filename': 'prediction_set.csv',
-            # makesure to upload these to your data bucket from DE2026/lab4/data
-            'model_repo': 'de2026_models'  # make sure to use your model bucket name
+            "project_id": PROJECT_ID,
+            "data_bucket": "winrate-data-2171997",
+            "trainset_filename": "home_advantage_initial.csv",
+            "testset_filename": "home_advantage_test.csv",
+            "model_repo": "winrate-models-2171997",
+            "accuracy_threshold": 0.49
         }
     )
-
     job.run()
+
 
 def parse_command_line_arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--target_file', type=str, default="training_pipeline.yaml", help="Pipeline Name")
-    args = parser.parse_args()
-    return vars(args)
+    parser.add_argument(
+        "--target_file", type=str, default="winrate_training_pipeline.yaml",
+        help="Compiled pipeline YAML path"
+    )
+    parser.add_argument("--run", action="store_true", help="Submit the compiled pipeline to Vertex AI")
+    return parser.parse_args()
 
-if __name__ == '__main__':
-    compile_pipeline(**parse_command_line_arguments())
-    # _run_pipeline() - This is only for testing - compile and run the pipeline via CI/CD as we did in Lab4 Live
+
+if __name__ == "__main__":
+    args = parse_command_line_arguments()
+    compile_pipeline(args.target_file)
+    if args.run:
+        _run_pipeline()
